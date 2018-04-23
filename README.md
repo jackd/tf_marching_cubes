@@ -9,7 +9,7 @@ Note the tensorflow implementation does not use `tf.py_func`, so should be piece
 Clone, and add the parent directory to your python path
 ```
 cd /path/to/parent_dir
-git clone
+git clone https://github.com/jackd/tf_marching_cubes.git
 export PYTHONPATH=$PYTHONPATH:/path/to/parent_dir
 ```
 
