@@ -1,5 +1,8 @@
 from __future__ import division
-from progress.bar import IncrementalBar
+try:
+    from progress.bar import IncrementalBar
+except ImportError:
+    pass
 import numpy as np
 import tensorflow as tf
 from tf_marching_cubes import isosurface
@@ -19,9 +22,8 @@ loss = tf.reduce_sum((radius - 1)**2)
 
 opt = tf.train.AdamOptimizer(1e-1).minimize(loss)
 
-n1 = 10000
-# n2 = 1
-n2 = 1
+n1 = 1000
+n2 = 5
 
 
 def vis_mesh(vertices, faces, include_wireframe=True, color=(0, 0, 1),
@@ -44,12 +46,17 @@ with tf.Session() as sess:
     vis_mesh(v, f)
     for _ in range(n2):
 
-        bar = IncrementalBar(max=n1)
+        try:
+            bar = IncrementalBar(max=n1)
+        except NameError:
+            bar = None
         for i in range(n1):
-            bar.next()
+            if bar is not None:
+                bar.next()
             sess.run(opt)
             # print(loss_val)
         v, f, loss_val = sess.run([verts, faces, loss])
         vis_mesh(v, f)
         print(loss_val)
-        bar.finish()
+        if bar is not None:
+            bar.finish()

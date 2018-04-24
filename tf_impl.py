@@ -406,17 +406,58 @@ def _get_isosurface_data():
 IsosurfaceDataCache = None
 
 
+def _get_cache_data():
+    global IsosurfaceDataCache
+    if IsosurfaceDataCache is None:
+        IsosurfaceDataCache = _get_isosurface_data()
+    return IsosurfaceDataCache
+
+
+def _get_cache_tensors():
+    faceShiftTables, edgeShifts, edgeTable, nTableFaces = _get_cache_data()
+    graph = tf.get_default_graph()
+    try:
+        nTableFaces_tf = graph.get_tensor_by_name('n_table_faces:0')
+        edgeTable_tf = graph.get_tensor_by_name('edge_table:0')
+        faceShiftTables_tf = tuple(
+            graph.get_tensor_by_name('face_shift_table%d:0' % i)
+            for i in range(len(faceShiftTables)-1))
+        paddings_tf = tuple(
+            graph.get_tensor_by_name('paddings%d:0' % i)
+            for i in range(len(edgeShifts))
+        )
+    except KeyError:
+        faceShiftTables_tf = tuple(tf.constant(
+            f, tf.int32, name='face_shift_table%d' % i)
+            for i, f in enumerate(faceShiftTables[1:]))
+
+        nTableFaces_tf = tf.constant(
+            nTableFaces, dtype=tf.int32, name='n_table_faces')
+        edgeTable_tf = tf.constant(
+            edgeTable, dtype=tf.uint16, name='edge_table')
+        paddings_tf = [tf.constant(
+            [[s, 1 - s] for s in padding], name='paddings%d' % i,
+            dtype=tf.int32)
+            for i, padding in enumerate(edgeShifts[:, :3])]
+    edge_shifts = edgeShifts[:, 3]
+    return faceShiftTables_tf, edgeTable_tf, nTableFaces_tf, paddings_tf, \
+        edge_shifts
+
+
 def isosurface(data, level):
     """
     Generate isosurface from volumetric data using marching cubes algorithm.
     See Paul Bourke, "Polygonising a Scalar Field"
     (http://paulbourke.net/geometry/polygonise/)
 
-    *data*   3D tensor of scalar values.
-    *level*  The level at which to generate an isosurface
+    Args:
+        `data`: 3D float32 tensor of scalar values.
+        `level`: Scalar, the level at which to generate an isosurface
 
-    Returns an array of vertex coordinates (Nv, 3) and an array of
-    per-face vertex indexes (Nf, 3)
+    Returns an array of vertex coordinates (Nv, 3) (float32) and an array of
+    per-face vertex indexes (Nf, 3), (int32).
+
+    Heavily based on numpy implementation in pyqt.
     """
     # For improvement, see:
     ##
@@ -424,18 +465,14 @@ def isosurface(data, level):
     # guarantees.
     # Thomas Lewiner, Helio Lopes, Antonio Wilson Vieira and Geovan Tavares.
     # Journal of Graphics Tools 8(2): pp. 1-15 (december 2003)
+    if not isinstance(data, tf.Tensor):
+        data = tf.convert_to_tensor(data, dtype=tf.float32)
+    if data.dtype != tf.float32:
+        data = tf.cast(data, tf.float32)
 
     # Precompute lookup tables on the first run
-    global IsosurfaceDataCache
-    if IsosurfaceDataCache is None:
-        IsosurfaceDataCache = _get_isosurface_data()
-    faceShiftTables, edgeShifts, edgeTable, nTableFaces = \
-        IsosurfaceDataCache
-
-    faceShiftTables_tf = tuple(
-        (None if f is None else tf.constant(f, tf.int32)
-         for f in faceShiftTables))
-    nTableFaces_tf = tf.constant(nTableFaces, dtype=tf.int32)
+    faceShiftTables_tf, edgeTable_tf, nTableFaces_tf, paddings_tf, \
+        edge_shifts = _get_cache_tensors()
 
     # mark everything below the isosurface level
     mask = tf.cast(data < level, tf.int32)
@@ -455,14 +492,17 @@ def isosurface(data, level):
     # Generate table of edges that have been cut
     cutEdges = [[], [], []]
 
-    edgeTable = tf.constant(edgeTable, dtype=tf.uint16)
-    edges = tf.gather(edgeTable, index)
-    for i, shift in enumerate(edgeShifts):
+    edges = tf.gather(edgeTable_tf, index)
+
+    # for i, shift in enumerate(edgeShifts):
+    for i, (padding, edge_shift) in enumerate(zip(paddings_tf, edge_shifts)):
         update = tf.bitwise.bitwise_and(edges, 2**i)
-        update = tf.pad(update, [[s, 1 - s] for s in shift[:3]])
-        cutEdges[shift[3]].append(update)
+        update = tf.pad(update, padding)
+        cutEdges[edge_shift].append(update)
     cutEdges = [tf.cast(tf.add_n(c), tf.int32) for c in cutEdges]
     cutEdges = tf.stack(cutEdges, axis=-1)
+    shape = np.array(index.shape.as_list()) + 1
+    cutEdges.set_shape(tuple(shape) + (3,))
 
     # for each cut edge, interpolate to see where exactly the edge is cut and
     # generate vertex positions
@@ -532,7 +572,7 @@ def isosurface(data, level):
         cellInds = tf.gather_nd(index, cells)
 
         # expensive:
-        verts = tf.gather(faceShiftTables_tf[i], cellInds)
+        verts = tf.gather(faceShiftTables_tf[i-1], cellInds)
         v0, v1 = tf.split(verts, [3, 1], axis=-1)
         s0, s1 = (-1 if s is None else s for s in cells.shape.as_list())
         cells = tf.reshape(cells, (s0, 1, 1, s1))
@@ -547,3 +587,88 @@ def isosurface(data, level):
     faces = tf.concat(faces, axis=0)
 
     return vertexes, faces
+
+
+def batch_isosurface(data, level, mesh_map_fn, dtype=None, **map_kwargs):
+    """
+    Performs isosurface extraction on each entry of data and maps the output.
+
+    Args:
+        `data`: 4D tensor of batch_size 3D grids of embedding function data
+        `level`: scalar, level of isosurface
+        `mesh_map_fn`: function mapping (vertices, faces) -> output. output
+            is a possibly nested tensor. If not a simple tf.float32 tensor,
+            it must have the same structure as dtype.
+        `dtype`: data type of returns tensors. Optional if `mesh_map_fn`
+            returns a single tf.float32 tensor.
+        `map_kwargs`: passed to `tf.map_fn`
+
+    Returns:
+        batched results of `mesh_map_fn`.
+
+    See `batch_padded_isosurface` for example that pads/crops output to a
+    constant size.
+    """
+    def map_fn(x):
+        verts, faces = isosurface(x, level)
+        return mesh_map_fn(verts, faces)
+
+    return tf.map_fn(map_fn, data, dtype, **map_kwargs)
+
+
+def batch_padded_isosurface(
+        data, level, max_vertices, max_faces, **map_kwargs):
+    """
+    Extracts an isosurface from 4D batched embedding grid in `data`.
+
+    Because each isosurface has a variable number of vertices and faces, this
+    function pads (or crops) the results to uniform size.
+
+    Args:
+        `data`: 4D tensor of batch_size 3D grids of embedding function data
+        `level`: scalar, level of isosurface
+        `max_vertices`: maximum number of vertices. If the isosurface has less
+            vertices, the remaining space is filled with infs. If more, only
+            the first `max_vertices` are returned. Note faces may reference
+            some of the cropped vertices, and it is up to the user to deal with
+            this.
+        `max_faces`: maximum number of faces. If the calculated isosurface has
+            less faces, the remaining spaces are filled with -1. If more, the
+            overflow faces are cropped out.
+        `map_kwargs`: passed to `tf.map_fn`
+
+    Returns:
+        `vertices`: (batch_size, max_vertices, 3) float32 tensor of vertex
+            positions
+        `faces`: (batch_size, max_faces, 3) int32 tensor of triangulated faces
+        `num_vertices`: (batch_size,) int32 tensor indicating the number
+            of vertices in the isosurface. If num_vertices < max_vertices,
+            padding occured, otherwise the result was cropped.
+        `num_faces`: (batch_size,) int32 tensor indicating the number
+            of vertices in the isosurface. If num_faces < max_faces,
+            padding occured, otherwise the result was cropped.
+    """
+    _get_cache_tensors()
+
+    def mesh_map_fn(verts_jagged, faces_jagged):
+        nv = tf.shape(verts_jagged)[0]
+        verts = tf.cond(
+            tf.greater(nv, max_vertices),
+            lambda: verts_jagged[:max_vertices],
+            lambda: tf.pad(
+                verts_jagged, [[0, max_vertices-nv], [0, 0]],
+                constant_values=np.inf)
+            )
+
+        nf = tf.shape(faces_jagged)[0]
+        faces = tf.cond(
+            tf.greater(nf, max_faces),
+            lambda: faces_jagged[:max_faces],
+            lambda: tf.pad(
+                faces_jagged, [[0, max_faces-nf], [0, 0]], constant_values=-1)
+        )
+        return verts, faces, nv, nf
+
+    dtype = tf.float32, tf.int32, tf.int32, tf.int32
+
+    return batch_isosurface(data, level, mesh_map_fn, dtype, **map_kwargs)

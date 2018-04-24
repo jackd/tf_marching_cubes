@@ -24,7 +24,6 @@ def vis(v, f, voxels):
     def vis_voxels(voxels, **kwargs):
         x, y, z = np.where(voxels)
         if len(x) == 0:
-            # raise ValueError('No voxels to display')
             Warning('No voxels to display')
         else:
             if 'mode' not in kwargs:
