@@ -9,15 +9,13 @@ fns = ['car_vox.npy', 'plane_vox.npy']
 voxels = np.array(
     [np.load(os.path.join(folder, fn)) for fn in fns], dtype=np.bool)
 
-data = np.empty(shape=voxels.shape, dtype=np.float32)
-data[voxels] = 1
-data[np.logical_not(voxels)] = -1
+data = np.array(voxels, dtype=np.float32)
 
 max_vertices = 5000
 max_faces = 5000
 
 verts, faces, nv, nf = batch_padded_isosurface(
-    data, 0, max_vertices, max_faces)
+    data, 0.5, max_vertices, max_faces)
 
 
 def vis_meshes(verts, faces, num_verts, num_faces):

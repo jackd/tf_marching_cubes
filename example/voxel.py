@@ -9,11 +9,9 @@ voxel_path = os.path.join(
 
 
 voxels = np.load(voxel_path)
-data = np.empty(shape=voxels.shape, dtype=np.float32)
-data[voxels] = 1
-data[np.logical_not(voxels)] = -1
+data = voxels.astype(np.float32)
 
-verts, faces = isosurface(data, 0)
+verts, faces = isosurface(data, 0.5)
 with tf.Session() as sess:
     v, f = sess.run([verts, faces])
 
