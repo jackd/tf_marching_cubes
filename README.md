@@ -1,6 +1,10 @@
 # Tensorflow Marching Cubes Implementation
 Basic implementation of marching cubes in tensorflow for extracting isosurfaces from embedding functions.
 
+This repository contains a number of variants:
+* A native tensorflow implementation, based on the numpy implementation from `pyqt`; and
+* Wrappers around `skimage.measure` functions using `tf.py_func`, along with a gradient hack to ensure vertices are differentiable.
+
 Based on the numpy implementation from pyqt. See `np_impl.py` for reference implementation.
 
 Note the implementation uses only native tensorflow operations (no `tf.py_func`), so is piece-wise differentiable. See [`example/learn.py`](https://github.com/jackd/tf_marching_cubes/blob/master/example/learn.py).
