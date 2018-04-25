@@ -107,8 +107,14 @@ def marching_cubes_lewiner(
     http://scikit-image.org/docs/dev/api/skimage.measure.html#skimage.measure.marching_cubes_lewiner
     """
     def fn(vol):
-        verts, faces, normals, values = measure.marching_cubes_lewiner(
-            vol, level=level, **kwargs)
+        if level < np.min(vol) or level > np.max(vol):
+            verts = np.zeros(shape=(0, 3), dtype=np.float32)
+            faces = np.zeros(shape=(0, 3), dtype=np.int32)
+            normals = np.zeros(shape=(0, 3), dtype=np.float32)
+            values = np.zeros(shape=(0,), dtype=np.float32)
+        else:
+            verts, faces, normals, values = measure.marching_cubes_lewiner(
+                vol, level=level, **kwargs)
         return verts, faces, normals, values
 
     with tf.name_scope('marching_cubes_lewiner'):
