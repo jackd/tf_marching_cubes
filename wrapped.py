@@ -21,9 +21,13 @@ def find_contours(data, level, back_prop=False, **kwargs):
         lengths: (m,) array of contour lengths.
     """
     def fn(data):
-        contours = measure.find_contours(data, level, **kwargs)
-        verts = np.concatenate(contours, axis=0)
-        lengths = np.array([len(c) for c in contours], dtype=np.int32)
+        if level < np.min(data) or level > np.max(data):
+            verts = np.zeros((0, 3), dtype=np.float32)
+            lengths = np.zeros((0,), dtype=np.int32)
+        else:
+            contours = measure.find_contours(data, level, **kwargs)
+            verts = np.concatenate(contours, axis=0).astype(np.float32)
+            lengths = np.array([len(c) for c in contours], dtype=np.int32)
         return verts, lengths
 
     with tf.name_scope('find_contours'):
