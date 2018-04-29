@@ -10,9 +10,10 @@ from tf_marching_cubes import isosurface
 n = 32
 x = np.linspace(-2, 2, n)
 x, y, z = np.meshgrid(x, x, x)
-x = x*x + y*y + z - 0.9
+x = 1 - (x*x + y*y + z)
 
 x = tf.Variable(x.astype(np.float32))
+x = tf.pad(x, [[1, 1], [1, 1], [1, 1]], constant_values=-1)
 
 verts, faces = isosurface(x, 0)
 verts = (verts - n/2) * (4 / n)
@@ -23,7 +24,7 @@ loss = tf.reduce_sum((radius - 1)**2)
 opt = tf.train.AdamOptimizer(1e-1).minimize(loss)
 
 n1 = 1000
-n2 = 5
+n2 = 3
 
 
 def vis_mesh(vertices, faces, include_wireframe=True, color=(0, 0, 1),
