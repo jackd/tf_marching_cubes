@@ -1,8 +1,14 @@
+#!/usr/bin/python
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import numpy as np
 import mayavi.mlab as mlab
-from tf_marching_cubes import isosurface
 from skimage.draw import ellipsoid
 import tensorflow as tf
+from tf_marching_cubes import isosurface
 
 # Generate a level set about zero of two identical ellipsoids in 3D
 ellip_base = ellipsoid(16, 20, 16, levelset=True)

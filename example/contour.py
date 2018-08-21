@@ -1,7 +1,12 @@
+#!/usr/bin/python
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import numpy as np
 import tensorflow as tf
 from tf_marching_cubes.wrapped import find_contours
-# from skimage import measure
 import matplotlib.pyplot as plt
 
 
