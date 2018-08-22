@@ -164,6 +164,38 @@ def marching_cubes_lewiner(
     return verts, faces, normals, values, empty
 
 
+def vertex_gradient_hack2(vertices, data, level=0):
+    with tf.name_scope('vertex_gradient_hack2'):
+        # vertices = tf.Print(vertices, [vertices])
+
+        v0 = tf.floor(vertices)
+        v0i = tf.cast(v0, tf.int32)
+        # 2 of 3 dims of vertices is an int, so cannot just add 1 like below
+        # v1 = v0 + 1
+        v1 = tf.ceil(vertices)
+        v1i = tf.cast(v1, tf.int32)
+
+        n_diff = tf.count_nonzero(
+            tf.logical_not(tf.equal(v0i, v1i)), axis=-1)
+
+        valid_mask = tf.equal(n_diff, 1)
+        vertices = tf.boolean_mask(vertices, valid_mask)
+
+        v0, v0i, v1, v1i = (tf.boolean_mask(v, valid_mask) for v in (
+            v0, v0i, v1, v1i))
+
+        f0 = tf.gather_nd(data, v0i)
+        f1 = tf.gather_nd(data, v1i)
+
+        numer = f0 if level == 0 else f0 - level
+        denom = f0 - f1
+        alpha = numer / denom  # possible catastrophic cancellation source?
+
+        alpha = tf.expand_dims(alpha, axis=-1)
+        interped = (1 - alpha)*v0 + alpha*v1
+    return interped
+
+
 def vertex_gradient_hack(vertices, data, level=0):
     """
     Get vertices at interpolated roots of data embedding fn with gradients.
@@ -176,7 +208,13 @@ def vertex_gradient_hack(vertices, data, level=0):
     Returns:
         (N, ndims) float32 array of vertex values with gradient information.
     """
+    raise RuntimeError(
+        'Bugged. Apparently not all vertices are on an edge between grid '
+        'points...')
+
     with tf.name_scope('vertex_gradient_hack'):
+        # vertices = tf.Print(vertices, [vertices])
+
         v0 = tf.floor(vertices)
         v0i = tf.cast(v0, tf.int32)
         # 2 of 3 dims of vertices is an int, so cannot just add 1 like below
@@ -187,17 +225,35 @@ def vertex_gradient_hack(vertices, data, level=0):
         f0 = tf.gather_nd(data, v0i)
         f1 = tf.gather_nd(data, v1i)
 
+        # n_diff = tf.count_nonzero(
+        #     tf.logical_not(tf.equal(v0i, v1i)), axis=-1)
+        # v_good = tf.where(tf.equal(n_diff, 1))
+        # v_good = tf.squeeze(v_good, axis=-1)
+
+        # v_special = tf.where(tf.equal(n_diff, 3.0))
+        # v_special = tf.squeeze(v_special, axis=-1)
+        # v_special = tf.gather(vertices, v_special)
+        #
+        #
+        # f0 = tf.Print(f0, [f_special])
+        # ones = tf.ones_like(n_diff)
+        # zeros = tf.zeros_like(n_diff)
+        # n_diffs = [tf.reduce_sum(tf.cast(tf.where(
+        #     tf.equal(n_diff, i), ones, zeros), tf.float32))
+        #     for i in range(5)]
+        # f0 = tf.Print(f0, n_diffs)
+
+        # f0 = tf.Print(f0, [
+        #     tf.reduce_min(tf.abs(f0)), tf.reduce_max(tf.abs(f0)),
+        #     tf.reduce_min(tf.abs(f1)), tf.reduce_max(tf.abs(f1)),
+        #     tf.reduce_min(tf.abs(f0-f1))])
+
         numer = f0 if level == 0 else f0 - level
         denom = f0 - f1
-        # tol = 1e-4
-        # alpha = tf.where(
-        #     tf.abs(numer) < tol, tf.zeros_like(numer), numer / (f0 - f1))
-        # eps = 1e-6
-        # alpha = numer / (denom + eps * tf.sign(denom))
         alpha = numer / denom  # possible catastrophic cancellation source?
+
         alpha = tf.expand_dims(alpha, axis=-1)
-        # alpha = tf.where(tf.abs(f0) < tol, tf.zeros_like(alpha), alpha)
-        alpha = tf.clip_by_value(alpha, 0, 1)
         interped = (1 - alpha)*v0 + alpha*v1
+        # interped = tf.where(tf.equal(n_diff, 1), interped, vertices)
 
     return interped
